@@ -53,6 +53,9 @@ uint8_t aRxBuffer[16];
 uint8_t bTransferRequest = 0;
 uint8_t initTransfer = 0;
 
+// GPS activation commands
+char startGPSCommand[15] = "AT+GPS=1\r\n";
+char startGPSCommandReceive[15] = "AT+GPSRD=5\r\n";
 
 #define DEBUG 1 // set to 0 to disable debugging
 
@@ -130,9 +133,24 @@ char vcc_timeout_message[40] = "Decode error: Low VCC. GPS power supply should b
 
 /** EEPROM STUFF **/
 // EEPROM Addresses
-uint32_t locAddress = 0x08004810;
-uint32_t timeAddress = 0x08005C10;
-uint32_t refAddress = 0x08004410;
+#define STM32F4 1
+
+#if STM32F4 == 1
+
+	// EEPROM memory address for STM32F401CCU6
+	uint32_t locAddress = 0x08004810;
+	uint32_t timeAddress = 0x08005C10;
+	uint32_t refAddress = 0x08004410;
+
+#else
+
+	// EEPROM memory address for STM32F103C8
+	uint32_t locAddress = 0x08004810;
+	uint32_t timeAddress = 0x08005C10;
+	uint32_t refAddress = 0x08004410;
+
+#endif
+
 char *data = "hello FLASH from ControllerTech\
 			  This is a test to see how many";
 
@@ -160,10 +178,40 @@ int minD = 0;     // Minutes lapsed since failed initialization
 char GGA[100]; // hold GGA data from GPS
 char RMC[100];
 
+char gpsResponseBuf[100]; // hold GPS response during initialization
+
 void initGPS(){
-	Uart_sendstring(start_GPS_command);
+
+	Uart_sendstring(startGPSCommand); // start GPS
+	HAL_Delay(200);
+	Uart_sendstring(startGPSCommandReceive); // receive GPS data after N seconds
+	HAL_Delay(200);
+
 }
 
+int checkGPSInitResponse() {
+
+	if(Wait_for("OK") == 1) {
+		VCCTimeout = 5000;
+		return 1;
+
+	} else {
+		VCCTimeout = 5000;
+		return 0;
+	}
+
+	if (VCCTimeout <= 0)
+	  {
+		  VCCTimeout = 5000;  // Reset the timeout
+
+		  //reset flags
+		  flagGGA =flagRMC =0;
+
+		  myprintf(huart1, vcc_timeout_message);
+		  return 0;
+	  }
+
+}
 
 void myprintf(UART_HandleTypeDef huart, const char* fmt,  ...){
 	static char buffer[256];
@@ -228,52 +276,63 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   Ringbuf_init();
-  //initGPS();
 
+  initGPS();
+
+
+  if(checkGPSInitResponse()) {
+	  sprintf(gpsResponseBuf,
+			"%s\n\r",
+			"Init OK"
+			);
+  } else {
+	  sprintf(gpsResponseBuf,
+		"%s\n\r",
+		"Init failed"
+		);
+  }
 
   // Get current time (microseconds
 
-  Ringbuf_init();
-
-  if (HAL_I2C_EnableListen_IT(&hi2c1) != HAL_OK) {
-	  /* Transfer error in reception process****/
-	  Error_Handler();
-  }
+//  if (HAL_I2C_EnableListen_IT(&hi2c1) != HAL_OK) {
+//	  /* Transfer error in reception process****/
+//	  Error_Handler();
+//  }
 
 
-  HAL_Delay(1000);
+//  HAL_Delay(1000);
 
-  int count = 0;
-  HAL_UART_Transmit(&huart1, "Trying GPS\n", 10, 100);
+//  int count = 0;
+//  HAL_UART_Transmit(&huart1, "Trying GPS\n", 10, 100);
+//
+//  while (!read_GPS() && count < 5) {
+//	  // wait until we have a GPS Lock
+//	  HAL_UART_Transmit(&huart1, "Trying GPS\n", 10, 100);
+//	  count++;
+//	  HAL_Delay(2000);
+//  }
 
-  while (!read_GPS() && count < 5) {
-	  // wait until we have a GPS Lock
-	  HAL_UART_Transmit(&huart1, "Trying GPS\n", 10, 100);
-	  count++;
-	  HAL_Delay(2000);
-  }
+//  count = 0;
+//  while (!Check_GeoFence() && count < 3) {
+//	  HAL_UART_Transmit(&huart1, "Trying GeoFence\n", 15, 100);
+//	  // notify stolen
+//	  count++;
+//	  if (!read_GPS()) {
+//		  return 0;
+//	  }
+//  }
 
-  count = 0;
-  while (!Check_GeoFence() && count < 3) {
-	  HAL_UART_Transmit(&huart1, "Trying GeoFence\n", 15, 100);
-	  // notify stolen
-	  count++;
-	  if (!read_GPS()) {
-		  return 0;
-	  }
-  }
-
-  if (count < 3) {
-	  linesInd = 2;
-	  Set_Time(minP);
-  }
-  count = 0;   // Reset count value to be re-used elsewhere
+//  if (count < 3) {
+//	  linesInd = 2;
+//	  Set_Time(minP);
+//  }
+//  count = 0;   // Reset count value to be re-used elsewhere
 
   // Start timer
-  HAL_TIM_Base_Start_IT(&htim2);
+//  HAL_TIM_Base_Start_IT(&htim2);
 
-  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
-  HAL_UART_Transmit(&huart1, "Shall we?", 9, 100);
+//  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
+//  HAL_UART_Transmit(&huart1, "Shall we?", 9, 100);
 
   /* USER CODE END 2 */
 
@@ -285,56 +344,64 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-#if DEBUG == 1
+//	  HAL_UART_Transmit(&huart1, (uint8_t*)gpsResponseBuf, 10, 100);
+//	  HAL_Delay(5);
+
 	  read_GPS();
 
 	  myprintf(huart1, posBuffer);
 	  myprintf(huart1, timeBuffer);
-
-#else
-	  if (Xfer_Complete == 1) {
-	 		  if (HAL_I2C_EnableListen_IT(&hi2c1) != HAL_OK) {
-	 		  	  /* Transfer error in reception process***/
-	 		  	  Error_Handler();
-	 		    }
-	 		  Xfer_Complete = 0;
-	 	  }
-
-	 	  // if one minute has passed, send tick
-	 	  if (minP) {
-	 		  minP = 0;
-	 		  if (linesInd == 1) {
-	 			  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);
-	 			  HAL_Delay(50);
-	 			  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
-	 			  if (!Save_toEEPROM(timeAddress, timeBuffer)){
-	 				  // cannot save time to EEPROM
-	 			  }
-	 			  if (dayP && count < 5) {
-	 				  if (read_GPS()) {
-	 					  if (!Check_GeoFence()) {
-	 						  // Not where it should be, do sumn
-	 						  count++;
-	 						  if (count == 5) stolenProtocol();
-	 					  } else dayP = 0;
-	 				  }
-	 				  else {
-	 					  // Cannot receive GPS reading
-	 					  count++;
-	 				  }
-	 			  }
-	 		  }
-	 		  else if (linesInd == 0) {
-	 			  if (setLoc == 1) {
-	 				  if (Set_Location(locAddress)) setLoc = 0;
-	 			  }
-	 			  minD++;
-	 			  if (read_GPS()) Set_Time(minD);
-	 		  }
-	 	  }
-
-	#endif
-
+//
+//#if DEBUG == 1
+//	  read_GPS();
+//
+//	  myprintf(huart1, posBuffer);
+//	  myprintf(huart1, timeBuffer);
+//
+//#else
+//	  if (Xfer_Complete == 1) {
+//	 		  if (HAL_I2C_EnableListen_IT(&hi2c1) != HAL_OK) {
+//	 		  	  /* Transfer error in reception process***/
+//	 		  	  Error_Handler();
+//	 		    }
+//	 		  Xfer_Complete = 0;
+//	 	  }
+//
+//	 	  // if one minute has passed, send tick
+//	 	  if (minP) {
+//	 		  minP = 0;
+//	 		  if (linesInd == 1) {
+//	 			  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);
+//	 			  HAL_Delay(50);
+//	 			  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
+////	 			  if (!Save_toEEPROM(timeAddress, timeBuffer)){
+////	 				  // cannot save time to EEPROM
+////	 			  }
+//	 			  if (dayP && count < 5) {
+//	 				  if (read_GPS()) {
+//	 					  if (!Check_GeoFence()) {
+//	 						  // Not where it should be, do sumn
+//	 						  count++;
+//	 						  if (count == 5) stolenProtocol();
+//	 					  } else dayP = 0;
+//	 				  }
+//	 				  else {
+//	 					  // Cannot receive GPS reading
+//	 					  count++;
+//	 				  }
+//	 			  }
+//	 		  }
+//	 		  else if (linesInd == 0) {
+//	 			  if (setLoc == 1) {
+//	 				  if (Set_Location(locAddress)) setLoc = 0;
+//	 			  }
+//	 			  minD++;
+//	 			  if (read_GPS()) Set_Time(minD);
+//	 		  }
+//	 	  }
+//
+//	#endif
+//
 
 
   }
@@ -585,49 +652,50 @@ int Set_Location(uint32_t address) {
  * @param delays = any added delays
  * @retval ticks = number of minute ticks to do time correction
  */
-int Get_TimeElapsed(int delays) {
-	/** Current time in uS */
-    int hr, min, sec;
-    int hrC, minC, secC;
-    Retrieve_EEPROM(timeAddress);
-    scanf(string, "%02d:%02d:%02d", &hr, &min, &sec);
-    if (hr < 1 && min < 1 && sec < 1) return 0;
-    scanf(timeBuffer, "%02d:%02d:%02d", &hrC, &minC, &secC);
-    if (hrC < 1 && minC < 1 && secC < 1) return 0;
-	hr = (hr >= 12) ? hr - 12 : hr;
-	hr = (hrC >= 12) ? hrC - 12 : hrC;
-	int total_minutes = hr * 60 + min;
-	int total_minutesC = hrC * 60 + min;
-	int diff = total_minutes + delays - total_minutesC;
-	if (diff < 0) diff += 720;
-
-	// time per fast-forward ticks is 1/2 sec
-	// so...to correct time we will have to have to add that time
-    diff += (diff / 30); // minutes convert to seconds then div by 2 since 2 ticks per sec
-	return diff;
-}
+//int Get_TimeElapsed(int delays) {
+//	/** Current time in uS */
+//    int hr, min, sec;
+//    int hrC, minC, secC;
+//    Retrieve_EEPROM(timeAddress);
+//    scanf(string, "%02d:%02d:%02d", &hr, &min, &sec);
+//    if (hr < 1 && min < 1 && sec < 1) return 0;
+//    scanf(timeBuffer, "%02d:%02d:%02d", &hrC, &minC, &secC);
+//    if (hrC < 1 && minC < 1 && secC < 1) return 0;
+//	hr = (hr >= 12) ? hr - 12 : hr;
+//	hr = (hrC >= 12) ? hrC - 12 : hrC;
+//	int total_minutes = hr * 60 + min;
+//	int total_minutesC = hrC * 60 + min;
+//	int diff = total_minutes + delays - total_minutesC;
+//	if (diff < 0) diff += 720;
+//
+//	// time per fast-forward ticks is 1/2 sec
+//	// so...to correct time we will have to have to add that time
+//    diff += (diff / 30); // minutes convert to seconds then div by 2 since 2 ticks per sec
+//	return diff;
+//}
 
 /**
  * @brief Sets clocks hands
  * @param none
  * @retval none
  */
-void Set_Time(int tickE) {
-  int ticks = Get_TimeElapsed(tickE);
-
-  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
-  if (ticks > 0) {
-	  linesInd = 2;
-	  for (int i = 0; i <= ticks; i++) {
-			//Uart_sendstring("Onn");
-			HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);
-			HAL_Delay (50);
-			HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
-			HAL_Delay (200);
-	  }
-	  linesInd = 1;
-  }
-}
+//void Set_Time(int tickE) {
+//  int ticks = Get_TimeElapsed(tickE);
+//
+////  HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
+//  if (ticks > 0) {
+//	  linesInd = 2;
+//	  for (int i = 0; i <= ticks; i++) {
+//			//Uart_sendstring("Onn");
+//		  // TODO: ADD A4988 DRIVER CODE
+////			HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);
+////			HAL_Delay (50);
+////			HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
+////			HAL_Delay (200);
+//	  }
+//	  linesInd = 1;
+//  }
+//}
 
 /**
  * @brief Function to save latest time in EEPROM
@@ -650,12 +718,12 @@ int Save_toEEPROM(uint32_t address, char* time) {
  * @param none
  * @retval none
  */
-void Retrieve_EEPROM (uint32_t address) {
-	memset(string,'\0', 50);
-	int numofwords = (strlen(data)/4)+((strlen(data)%4)!=0); // Update Data value, use standard
-	Flash_Read_Data(address , Rx_Data, numofwords);
-	Convert_To_Str(Rx_Data, string);
-}
+//void Retrieve_EEPROM (uint32_t address) {
+//	memset(string,'\0', 50);
+//	int numofwords = (strlen(data)/4)+((strlen(data)%4)!=0); // Update Data value, use standard
+//	Flash_Read_Data(address , Rx_Data, numofwords);
+//	Convert_To_Str(Rx_Data, string);
+//}
 
 
 /**
@@ -729,24 +797,24 @@ int read_GPS(void) {
  * @param none
  * @retval int
  **/
-int Check_GeoFence(void) {
-	float lon, lat, lonS, latS;
-	char ns, ew, nsS, ewS;
-	Retrieve_EEPROM(locAddress);
-	scanf(string, "%.2f%c, %.2f%c  ", &lat,&ns,&lon,&ew);
-	if (lat < 1 && lon < 1) return 0;
-	scanf(posBuffer, "%.2f%c, %.2f%c  ", &latS,&nsS,&lonS,&ewS);
-	float theta, dist;
-	theta = lonS - lon;
-	dist = sin(deg2rad(latS)) * sin(deg2rad(lat)) + cos(deg2rad(latS)) * cos(deg2rad(lat)) * cos(deg2rad(theta));
-	dist = acos(dist);
-	dist = rad2deg(dist);
-	dist = dist * 60 * 1.1515;
-	dist = dist * 1609.344;   // Distance in meters
-	if (dist < 50) {
-		return 1;
-	} else return -1;
-}
+//int Check_GeoFence(void) {
+//	float lon, lat, lonS, latS;
+//	char ns, ew, nsS, ewS;
+//	Retrieve_EEPROM(locAddress);
+//	scanf(string, "%.2f%c, %.2f%c  ", &lat,&ns,&lon,&ew);
+//	if (lat < 1 && lon < 1) return 0;
+//	scanf(posBuffer, "%.2f%c, %.2f%c  ", &latS,&nsS,&lonS,&ewS);
+//	float theta, dist;
+//	theta = lonS - lon;
+//	dist = sin(deg2rad(latS)) * sin(deg2rad(lat)) + cos(deg2rad(latS)) * cos(deg2rad(lat)) * cos(deg2rad(theta));
+//	dist = acos(dist);
+//	dist = rad2deg(dist);
+//	dist = dist * 60 * 1.1515;
+//	dist = dist * 1609.344;   // Distance in meters
+//	if (dist < 50) {
+//		return 1;
+//	} else return -1;
+//}
 
 
 /**
@@ -788,69 +856,69 @@ void HAL_I2C_SlaveTxCpltCallback(I2C_HandleTypeDef *hi2c)
   *         you can add your own implementation.
   * @retval None
   */
-void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c)
-{
-  HAL_UART_Transmit(&huart1, aRxBuffer, 16, 100);
-
-  char *s, *t, *d, *l;
-  s = strstr(aRxBuffer, "Linestat");
-  t = strstr(aRxBuffer, "SetLocation");
-  d = strstr(aRxBuffer, "GetTime");
-  l = strstr(aRxBuffer, "SetLineState");
-  if (s != NULL){
-	  char * txM;
-	  memset(aTxBuffer, '\0', 16);
-	  switch (linesInd) {
-	  case 0:
-		  txM = "LineStatus STOP.";
-		  break;
-	  case 1:
-		  txM = "LineStatus RUN..";
-		  break;
-	  case 2:
-		  txM = "LineStatus FASTF";
-		  break;
-	  case 3:
-		  txM = "LineStatus FF>12";
-		  break;
-	  }
-	  sprintf(aTxBuffer, txM);
-	  HAL_UART_Transmit(&huart1, aTxBuffer, 16, 100);
-	  HAL_UART_Transmit(&huart1, "It's here", 9, 100);
-  }
-  if (t != NULL) {
-	  setLoc = 1;
-	  memset(aTxBuffer, '\0', 16);
-	  uint8_t txM = "Setting Location";
-	  sprintf(aTxBuffer, txM);
-  }
-  if (d != NULL) {
-	  memset(aTxBuffer, '\0', 16);
-	  sprintf(aTxBuffer, timeBuffer + "....");
-	  HAL_UART_Transmit(&huart1, aTxBuffer, 16, 100);
-	  HAL_UART_Transmit(&huart1, "It's not here", 12, 100);
-  }
-  if (l != NULL) {
-	  uint8_t st;
-	  char *c, *txM;
-	  sscanf(aRxBuffer, "%s %d", c, st);
-	  switch (st) {
-	  case 0:
-		  txM = "Line Set to STOP";
-		  break;
-	  case 1:
-		  txM = "Line Set to RUN.";
-		  break;
-	  case 2:
-		  txM = "Line FForward>12";
-		  break;
-	  }
-	  memset(aTxBuffer, '\0', 16);
-	  sprintf(aTxBuffer, txM);
-	  HAL_UART_Transmit(&huart1, aTxBuffer, 16, 100);
-	  HAL_UART_Transmit(&huart1, "It's not here", 12, 100);
-  }
-}
+//void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c)
+//{
+//  HAL_UART_Transmit(&huart1, aRxBuffer, 16, 100);
+//
+//  char *s, *t, *d, *l;
+//  s = strstr(aRxBuffer, "Linestat");
+//  t = strstr(aRxBuffer, "SetLocation");
+//  d = strstr(aRxBuffer, "GetTime");
+//  l = strstr(aRxBuffer, "SetLineState");
+//  if (s != NULL){
+//	  char * txM;
+//	  memset(aTxBuffer, '\0', 16);
+//	  switch (linesInd) {
+//	  case 0:
+//		  txM = "LineStatus STOP.";
+//		  break;
+//	  case 1:
+//		  txM = "LineStatus RUN..";
+//		  break;
+//	  case 2:
+//		  txM = "LineStatus FASTF";
+//		  break;
+//	  case 3:
+//		  txM = "LineStatus FF>12";
+//		  break;
+//	  }
+//	  sprintf(aTxBuffer, txM);
+//	  HAL_UART_Transmit(&huart1, aTxBuffer, 16, 100);
+//	  HAL_UART_Transmit(&huart1, "It's here", 9, 100);
+//  }
+//  if (t != NULL) {
+//	  setLoc = 1;
+//	  memset(aTxBuffer, '\0', 16);
+//	  uint8_t txM = "Setting Location";
+//	  sprintf(aTxBuffer, txM);
+//  }
+//  if (d != NULL) {
+//	  memset(aTxBuffer, '\0', 16);
+//	  sprintf(aTxBuffer, timeBuffer + "....");
+//	  HAL_UART_Transmit(&huart1, aTxBuffer, 16, 100);
+//	  HAL_UART_Transmit(&huart1, "It's not here", 12, 100);
+//  }
+//  if (l != NULL) {
+//	  uint8_t st;
+//	  char *c, *txM;
+//	  sscanf(aRxBuffer, "%s %d", c, st);
+//	  switch (st) {
+//	  case 0:
+//		  txM = "Line Set to STOP";
+//		  break;
+//	  case 1:
+//		  txM = "Line Set to RUN.";
+//		  break;
+//	  case 2:
+//		  txM = "Line FForward>12";
+//		  break;
+//	  }
+//	  memset(aTxBuffer, '\0', 16);
+//	  sprintf(aTxBuffer, txM);
+//	  HAL_UART_Transmit(&huart1, aTxBuffer, 16, 100);
+//	  HAL_UART_Transmit(&huart1, "It's not here", 12, 100);
+//  }
+//}
 
 /**
   * @brief  Slave Address Match callback.
@@ -860,31 +928,31 @@ void HAL_I2C_SlaveRxCpltCallback(I2C_HandleTypeDef *hi2c)
   * @param  AddrMatchCode: Address Match Code
   * @retval None
   */
-void HAL_I2C_AddrCallback(I2C_HandleTypeDef *hi2c, uint8_t TransferDirection, uint16_t AddrMatchCode)
-{
-	Transfer_Direction = TransferDirection;
-	//if (TransferDirection == I2C_DIRECTION_TRANSMIT) {
-	if (Transfer_Direction != I2C_DIRECTION_TRANSMIT) {
-		//HAL_UART_Transmit(&huart1, "TXX", 3, 100);
-		/*##- Put I2C peripheral in reception process ###########################*/
-		if (HAL_I2C_Slave_Seq_Transmit_IT(&hi2c1, (uint8_t *)aTxBuffer, 16, I2C_FIRST_AND_LAST_FRAME) != HAL_OK)
-		{
-			/* Transfer error in reception process */
-			Error_Handler();
-		}
-	}
-	else {
-		//HAL_UART_Transmit(&huart1, "RXX", 3, 100);
-		/*##- Put I2C peripheral in reception process ###########################*/
-		if (HAL_I2C_Slave_Seq_Receive_IT(&hi2c1, (uint8_t *)aRxBuffer, 16, I2C_FIRST_AND_LAST_FRAME) != HAL_OK)
-		{
-			/* Transfer error in reception process */
-			Error_Handler();
-		}
-		//HAL_UART_Transmit(&huart1, "RXC", 3, 100);
-	}
-
-}
+//void HAL_I2C_AddrCallback(I2C_HandleTypeDef *hi2c, uint8_t TransferDirection, uint16_t AddrMatchCode)
+//{
+//	Transfer_Direction = TransferDirection;
+//	//if (TransferDirection == I2C_DIRECTION_TRANSMIT) {
+//	if (Transfer_Direction != I2C_DIRECTION_TRANSMIT) {
+//		//HAL_UART_Transmit(&huart1, "TXX", 3, 100);
+//		/*##- Put I2C peripheral in reception process ###########################*/
+//		if (HAL_I2C_Slave_Seq_Transmit_IT(&hi2c1, (uint8_t *)aTxBuffer, 16, I2C_FIRST_AND_LAST_FRAME) != HAL_OK)
+//		{
+//			/* Transfer error in reception process */
+//			Error_Handler();
+//		}
+//	}
+//	else {
+//		//HAL_UART_Transmit(&huart1, "RXX", 3, 100);
+//		/*##- Put I2C peripheral in reception process ###########################*/
+//		if (HAL_I2C_Slave_Seq_Receive_IT(&hi2c1, (uint8_t *)aRxBuffer, 16, I2C_FIRST_AND_LAST_FRAME) != HAL_OK)
+//		{
+//			/* Transfer error in reception process */
+//			Error_Handler();
+//		}
+//		//HAL_UART_Transmit(&huart1, "RXC", 3, 100);
+//	}
+//
+//}
 
 /**
   * @brief  Listen Complete callback.
@@ -892,11 +960,11 @@ void HAL_I2C_AddrCallback(I2C_HandleTypeDef *hi2c, uint8_t TransferDirection, ui
   *                the configuration information for the specified I2C.
   * @retval None
   */
-void HAL_I2C_ListenCpltCallback(I2C_HandleTypeDef *hi2c)
-{
-	Xfer_Complete = 1;
-	HAL_UART_Transmit(&huart1, "Lcpl", 4, 100);
-}
+//void HAL_I2C_ListenCpltCallback(I2C_HandleTypeDef *hi2c)
+//{
+//	Xfer_Complete = 1;
+//	HAL_UART_Transmit(&huart1, "Lcpl", 4, 100);
+//}
 
 
 /**

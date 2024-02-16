@@ -37,7 +37,6 @@ ring_buffer *_tx_buffer;
 
 void store_char(unsigned char c, ring_buffer *buffer);
 
-
 void Ringbuf_init(void)
 {
   _rx_buffer = &rx_buffer;

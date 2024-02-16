@@ -34,6 +34,8 @@ Add defines to memory location where to write time to. Change them according to 
 #define STOP_ADDRESS 
 ```
 
+Check flash memory addresses in the ```FLASH_PAGE_F1.h```
+
 ### Debugging
 When deploying, set the ```DEBUG``` define in the main.c to 0
 
@@ -46,6 +48,7 @@ When deploying, set the ```DEBUG``` define in the main.c to 0
 ...
 
 #define DEBUG 1 // set to 0 to disable debugging
+
 
 /* USER CODE END PD */
 ```
